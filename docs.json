@@ -11,11 +11,26 @@
   "navigation": {
     "pages": [
       {
-        "group": "Getting Started",
+        "group": "Product",
         "pages": [
-          "index",
-          "quickstart"
+          "overview",
+          "architecture",
+          "core-features"
         ]
+      },
+      {
+        "group": "Platform",
+        "pages": [
+          "untitled-page"
+        ]
+      },
+      {
+        "group": "Frontend",
+        "pages": []
+      },
+      {
+        "group": "Delivery",
+        "pages": []
       }
     ],
     "global": {
