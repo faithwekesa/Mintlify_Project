@@ -1,0 +1,250 @@
+---
+title: "Mobile App"
+---
+
+---
+
+## title: "Mobile App (Flutter)" description: "The cooperative and buyer-facing mobile interface"
+
+This is the interface that cooperative leaders and wholesale buyers interact with on the mobile app. The interface differs based on the user persona (cooperative manager vs. wholesale buyer).
+
+## Overview
+
+The Ishuko mobile app is the primary, customer-facing surface of the platform — it serves two distinct personas from a single codebase: **Cooperative Managers**, who register their cooperative, run AI grading sessions, and manage listings; and **Wholesale Buyers**, who browse the marketplace, place orders, and complete pickup. Role is determined at signup and drives which screen set a user sees after authentication.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Framework | Flutter |
+| Language | Dart |
+| Routing | go_router |
+| State/data access | http client + a viewmodel/ layer |
+| Local storage | shared_preferences (non-sensitive), flutter_secure_storage (sensitive — e.g. auth token) |
+| Auth provider | Email/password + google_sign_in |
+| Location | geolocator + geocoding |
+| Camera/media | image_picker (camera-only — see Security Measures) |
+
+## Screens
+
+## Screens
+
+<Tabs>
+  <Tab title="Shared / Auth">
+    - Onboarding Carousel
+    - Sign Up (Buyer / Cooperative toggle)
+    - Login
+    - Forgot Password
+    - OTP Verification
+    - Allow Location
+    - Password Reset
+
+    <div style={{display: 'flex', gap: '16px', justifyContent: 'center'}}>
+  <img src="/images/ishukolandingpage-4.png" alt="Landing screen" style={{width: '48%', borderRadius: '12px'}} />
+
+  <img src="/images/ishukosignuppage-2.png" alt="Sign up screen" style={{width: '48%', borderRadius: '12px'}} />
+</div>
+  </Tab>
+  <Tab title="Cooperative">
+    - Buyer Home Dashboard (shared entry)
+    - Listings History
+    - Orders History
+    - Payment History
+    - 3-Photo Grading Input
+    - AI Analysis Engine
+    - AI Quality Report
+    - Listing Preview
+    - Pickup Verification (6-digit code)
+    - Cooperative Profile
+    - Cooperative Support
+
+    <div style={{display: 'flex', gap: '16px', justifyContent: 'center'}}>
+  <img src="/images/ishukocooperativepage1.png" alt="Cooperative screen" style={{width: '48%', borderRadius: '12px'}} />
+
+  <img src="/images/ishukocooperativepage2.png" alt="Cooperative screen" style={{width: '48%', borderRadius: '12px'}} />
+</div>
+  </Tab>
+  <Tab title="Buyer">
+    - Marketplace Browse
+    - Shopping Cart
+    - Pickup Date Picker (7-day max)
+    - Notifications
+    - Buyer Profile
+    - Contact Support
+
+    <div style={{display: 'flex', gap: '16px', justifyContent: 'center'}}>
+  <img src="/images/buyerscreen1.png" alt="Buyer screen" style={{width: '48%', borderRadius: '12px'}} />
+
+  <img src="/images/buyerscreen2.png" alt="Buyer screen" style={{width: '48%', borderRadius: '12px'}} />
+</div>
+  </Tab>
+</Tabs>
+
+## How it works — cooperative manager
+
+<Steps>
+  <Step title="Registration">
+    A cooperative manager registers via the mobile app, providing GPS coordinates to establish their physical depot location. Sign-up with Google is also available. Location is required only for the cooperative flow.
+  </Step>
+  <Step title="On-site grading session">
+    To upload a product listing, the manager initializes a grading session by uploading exactly 3 images of the same batch via the native Ishuko camera interface (gallery upload is disabled to prevent reuse of old images).
+  </Step>
+  <Step title="Grading">
+    Photos are processed by the centralized AI classification model, which outputs an objective grade tag. See [Core Features](/core-features) and the [AI Quality Assessment Module](/ai-quality-assessment) for the grading thresholds and pipeline.
+  </Step>
+  <Step title="Marketplace pipeline">
+    The assigned grade, total weight, and AI image details combine into a Quality Assessment Report, which includes the auto-assigned market price (sourced from the WFP HDX market prices document).
+  </Step>
+  <Step title="Secure escrow lifecycle">
+    The cooperative manager retrieves money deposited by the buyer from a temporary escrow account. The buyer provides a 6-digit code to the manager, granting access to retrieve the funds.
+  </Step>
+  <Step title="Handover & settlement">
+    On arrival at the depot, the buyer inspects the batch and hands over the 6-digit code. Submitting the code instantly triggers settlement scripts, releasing escrowed payment to the seller.
+  </Step>
+</Steps>
+
+## How it works — wholesale buyer
+
+<Steps>
+  <Step title="Registration">
+    A buyer registers using full name, valid email, and valid phone number. Location is not required for buyer registration.
+  </Step>
+  <Step title="Explore marketplace">
+    The buyer browses listings posted by cooperative managers. Listings show price, grade, and quantity; the buyer cannot purchase a partial quantity.
+  </Step>
+  <Step title="Placing an order">
+    The buyer adds to cart, then selects a pickup date. The pickup date must be within 7 days of the order placement date — dates outside that window are automatically disabled.
+  </Step>
+  <Step title="Notification">
+    Once funds are deposited into escrow, the buyer receives a notification with the cooperative's location and the 6-digit code used by the manager to retrieve funds. The code expires within 7 days; an uncollected order is refunded to the buyer with a 5% loss for wasting the cooperative's time.
+  </Step>
+  <Step title="Collection">
+    The cycle ends when the buyer receives their order and gives the 6-digit code to the cooperative manager, who then retrieves the payment.
+  </Step>
+</Steps>
+
+## Data flow pipelines
+
+Ishuko processes data across three micro-ecosystems: the mobile app (cooperative side), the centralized FastAPI/AI backend, and the public app marketplace.
+
+<AccordionGroup>
+  <Accordion title="AI grading">
+    1. The cooperative manager takes 3 images of the produce via the mobile app camera.
+    2. The images are sent to the AI, analyzed, and assigned a grade and market price.
+    3. A Quality Assurance Report is generated.
+    4. The report is sent to the backend for storage.
+  </Accordion>
+
+  <Accordion title="Produce listings">
+    1. The cooperative manager initializes a listing.
+    2. The app packages raw harvest inputs (quantity, crop type) with the grading image and transmits structured multipart form data to the backend via `POST /produce_listings/`.
+  </Accordion>
+
+  <Accordion title="Marketplace">
+    1. When a buyer clicks purchase, they select a pickup date within 7 days of order placement.
+    2. A transaction record is created; the backend captures the payment amount, stores it in an isolated escrow ledger, and dispatches a cryptographically random, hashed 6-digit OTP to the buyer via mobile notification.
+    3. At pickup, the buyer provides the code to the cooperative leader, who submits it via `POST /transactions/{id}/release`. If the hash matches, `escrow_status` toggles to `RELEASED` and funds are pushed to the seller's mobile money balance.
+  </Accordion>
+</AccordionGroup>
+
+## Architecture layers
+
+The `lib/` folder follows a lightweight MVVM-flavored layering rather than a strict framework:
+
+| Layer | Responsibility |
+| --- | --- |
+| `models/` | Plain data classes for API responses (`grade_report_model.dart`, `home_model.dart`, `payment_model.dart`) — no business logic, just shape |
+| `viewmodel/` | Mediates between a screen and its services (e.g. `signup_viewmodel.dart` drives the sign-up screen's validation and submission state) |
+| `services/` | Talks to the outside world: the API (`camera_services.dart`'s upload path, `cart_service.dart`), device capabilities (`location_services.dart`), and OS-level features (`notification_service.dart`) |
+| `screens/` | The UI layer, split by persona (`buyer/`, `cooperative/`) plus shared auth/onboarding screens at the top level |
+| `widgets/` / `components/` | Small, reusable UI pieces shared across screens (e.g. `app_bottom_nav_bar.dart`) |
+
+## Core components
+
+- **Routing (go_router)** — declarative, role-aware navigation; routes buyers into `screens/buyer/` and cooperative managers into `screens/cooperative/` after authentication.
+- **API service** — a shared `http`-based client used by the various `services/` files to call the FastAPI backend, attaching the stored JWT to authenticated requests.
+- **Auth service** — backs login, signup, Google sign-in, and the forgot-password/OTP/reset flow; persists the session token via `flutter_secure_storage` rather than `shared_preferences`.
+- **Sync/notification service** (`notification_service.dart`) — surfaces OTP codes, pickup reminders, and order-status updates pushed from the backend.
+
+## Security measures
+
+- **Camera-only capture, no gallery import** — the grading flow overrides the native image picker configuration to disable gallery selection entirely, so a cooperative manager can only submit freshly captured photos, not pre-existing/potentially stale or tampered images.
+- **Exactly-3-image validation** — the grading session enforces exactly 3 images client-side before the "Grade" action is enabled, matching the AI pipeline's expected input.
+- **Secure token storage** — the JWT issued at login is stored via `flutter_secure_storage` (OS-level encrypted storage), not plain `shared_preferences`, so a lost/rooted device doesn't trivially leak an active session.
+- **Field-level input validation** — email format, phone number format, and exact 6-digit OTP input are all validated client-side before submission.
+- **Location permission is explicit and scoped** — GPS is requested only during cooperative registration, with a clear in-app explanation of why.
+
+## Installation
+
+<Steps>
+  <Step title="Prerequisites">
+    - Flutter SDK (stable channel) and Dart (bundled with Flutter)
+    - Android Studio / Xcode for platform-specific builds, or a configured emulator/simulator
+    - A running backend instance (local or the hosted API) reachable from the device/emulator
+  </Step>
+  <Step title="Install dependencies">
+    ```bash
+        cd ishuko
+        flutter pub get
+    ```
+  </Step>
+  <Step title="Configure environment">
+    Create a `.env` file (loaded via `flutter_dotenv`) with the backend base URL:
+
+    ```bash
+        API_BASE_URL=http://localhost:8000
+    ```
+  </Step>
+  <Step title="Run the app">
+    ```bash
+        flutter run
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+| Symptom | Likely Cause / Fix |
+| --- | --- |
+| Camera won't open during grading | Camera permission was denied — check `permission_handler` request flow and OS-level app permissions |
+| "Allow Location" screen loops or GPS never resolves | Location permission denied, or device location services are off — required only for cooperative registration |
+| OTP not received | SMS/notification gateway delay, or the code already expired (7-day window) — use the in-app "Resend" action |
+| Grading stuck on "Calculating Grade" | AI service cold start or network timeout — verify the AI microservice health endpoint is reachable |
+| Google Sign-In fails silently | Missing/incorrect OAuth client configuration for the platform (Android/iOS) in `google_sign_in` setup |
+| App can't reach the backend locally | `API_BASE_URL` in `.env` points to localhost but the app is running on a physical device/emulator that can't resolve it — use the machine's LAN IP instead |
+
+## Folder structure
+
+<Accordion title="lib/ — full breakdown">
+  ishuko/ ├── analysis_options.yaml ├── pubspec.yaml ├── README.md ├── android/ ├── assets/ │   └── images/ ├── fonts/ ├── ios/ ├── lib/ │   ├── main.dart │   ├── mock_data.dart │   ├── components/ │   ├── constants/ │   ├── data/ │   ├── models/ │   ├── screens/ │   ├── services/ │   ├── viewmodel/ │   └── widgets/ ├── linux/ ├── macos/ ├── test/ ├── web/ └── windows/
+</Accordion>
+
+## Dependencies
+
+<Tabs>
+  <Tab title="Production">
+    | Package | Purpose |
+    | --- | --- |
+    | flutter | Core Flutter framework |
+    | cupertino_icons | iOS-style icon library |
+    | http | HTTP client for network requests |
+    | smooth_page_indicator | Page indicator for page views |
+    | google_sign_in | Google authentication sign-in integration |
+    | geolocator | Get device GPS location coordinates |
+    | flutter_dotenv | Load environment variables from files |
+    | shared_preferences | Persistent key-value local storage |
+    | flutter_secure_storage | Secure storage for sensitive credentials |
+    | go_router | Navigation routing for Flutter apps |
+    | image_picker | Select images from device storage |
+    | permission_handler | Request runtime device permissions |
+    | geocoding | Convert GPS coordinates to addresses |
+    | flutter_launcher_icons | Generate app launcher icons automatically |
+  </Tab>
+  <Tab title="Dev">
+    | Package | Purpose |
+    | --- | --- |
+    | flutter_test | Flutter testing framework and tools |
+    | flutter_lints | Recommended Dart/Flutter lint rules |
+    | change_app_package_name | Change app package name utility |
+  </Tab>
+</Tabs>

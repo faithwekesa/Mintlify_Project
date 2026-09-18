@@ -21,16 +21,24 @@
       {
         "group": "Platform",
         "pages": [
-          "untitled-page"
+          "untitled-page-5",
+          "untitled-page",
+          "untitled-page-3"
         ]
       },
       {
         "group": "Frontend",
-        "pages": []
+        "pages": [
+          "untitled-page-2",
+          "untitled-page-4"
+        ]
       },
       {
         "group": "Delivery",
-        "pages": []
+        "pages": [
+          "untitled-page-6",
+          "untitled-page-7"
+        ]
       }
     ],
     "global": {

@@ -1,0 +1,87 @@
+---
+title: "Quality Assurance And Testing"
+---
+
+---
+
+## title: "Quality Assurance & Testing" description: "Testing strategy across backend, mobile, frontend, and the AI pipeline"
+
+## Testing strategy
+
+<Tabs>
+  <Tab title="Backend (Python API)">
+    - Validate WFP HDX market price fetching scripts; mock external database calls.
+    - Test the 6-digit OTP generation logic.
+    - Unit test the calculation utility that handles the 5% cancellation penalty.
+  </Tab>
+  <Tab title="Mobile App (Flutter)">
+    - Test state management blocks for cooperative and buyer flows.
+    - Validate field validation rules — valid email, phone number format, exact 6-digit OTP inputs.
+  </Tab>
+  <Tab title="Frontend (Web)">
+    - Unit test the date picker widget constraint logic to ensure dates beyond 7 days are hard-disabled in the UI.
+  </Tab>
+</Tabs>
+
+## Integration testing
+
+<AccordionGroup>
+  <Accordion title="Camera → AI pipeline">
+    - Mock the upload of exactly 3 maize images.
+    - Verify the image processing pipeline runs them through the [computer vision model](/ai-quality-assessment) and outputs a consolidated grade object (A, B, C, or D).
+  </Accordion>
+
+  <Accordion title="Escrow transaction lifecycle">
+    Simulate the full cycle: order placement → hold funds in escrow → fire notification with 6-digit OTP → OTP entered by cooperative manager → trigger instant settlement script → release funds. See [Security → Webhook Security](/security) for how each step is verified.
+  </Accordion>
+</AccordionGroup>
+
+## Performance & load testing
+
+- **AI inference latency** — benchmark computer vision processing speed; grading reports should return within \< 3 seconds under concurrent image upload spikes.
+- **Concurrent marketplace traffic** — load test marketplace database queries when multiple wholesale buyers filter bulk listings simultaneously.
+
+## Security & compliance
+
+- **Escrow fraud prevention** — funds can never be released without a matching 6-digit OTP cryptographic hash.
+- **Data privacy** — location data provided by the cooperative manager is encrypted. See [Security → Data Classification](/security) for the full data handling table.
+
+## Regression & user acceptance testing (UAT)
+
+- **Regression testing** — verify that modifying marketplace pricing rules does not break existing generated Quality Assessment Reports.
+
+## Test data management
+
+- **Real data** — a diverse set of physical maize sample photos across regional cooperatives to build the baseline truth dataset for validation.
+- **Synthetic data** — programmatic mock variations of maize images (tweaking brightness, contrast, rotation) to test edge cases of the grading model; mock high-volume buyer transaction datasets.
+
+## Continuous integration & code review
+
+Automated CI pipelines run `flutter analyzer`, linter rules, and all backend/frontend unit tests on every GitHub Pull Request.
+
+## Monitoring & logging
+
+**Error tracking** — crash reporting integrated in the Flutter app to capture live production UI crashes or image upload timeouts.
+
+## Release criteria & success metrics
+
+<CardGroup cols={3}>
+  <Card title="Code coverage" icon="check">
+    Minimum 80% unit test coverage across frontend widgets and backend logic.
+  </Card>
+
+  <Card title="AI grading accuracy" icon="target">
+    Minimum 95% precision classifying thresholds for Grade A through Grade D.
+  </Card>
+
+  <Card title="Zero critical bugs" icon="shield">
+    No blocking vulnerabilities or failed escrow state loops prior to production deployment.
+  </Card>
+</CardGroup>
+
+## References & live docs
+
+- Swagger / OpenAPI docs (backend `/docs`)
+- Postman collection
+- ClickUp QA Board
+- Product Requirement Document (PRD)

@@ -1,0 +1,84 @@
+---
+title: "Admin Web Dashboard"
+---
+
+## Overview
+
+The Admin Web Dashboard is the internal tool Platform Administrators use to oversee Ishuko — it is not customer-facing. It serves one role only (ADMIN), gated by MFA at sign-in and RBAC-enforced on every API call, giving admins visibility into cooperatives, buyers, and system health without touching the mobile app.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Framework | Next.js (App Router) |
+| Language | TypeScript / JavaScript |
+| Styling | Tailwind CSS |
+| Testing | Jest + React Testing Library |
+| Hosting | Vercel |
+
+## Authentication
+
+- **Login:** `POST /auth/login` returns a JWT (and, if 2FA is enabled, a `two_factor_required` flag + `pre_auth_token` to complete verification).
+- **Forgot password:** a three-step OTP flow — request a reset code, verify it, then set a new password.
+- **Token handling:** the JWT is attached to every API call as `Authorization: Bearer <token>`; an expired or missing token redirects back to `/login` rather than rendering a partial dashboard.
+
+## First steps after login
+
+<CardGroup cols={3}>
+  <Card title="Dashboard">
+    Total cooperatives, active regions, average yield per cooperative.
+  </Card>
+
+  <Card title="Cooperative Summary">
+    A searchable/filterable table — ID, name, region, members, volume, status.
+  </Card>
+
+  <Card title="Buyer Summary">
+    A searchable/filterable table — ID, buyer, country, orders, total spend, status.
+  </Card>
+</CardGroup>
+
+## Code standards
+
+- **Components:** always use functional components.
+- **Naming:** camelCase for variables/functions, PascalCase for component names, SCREAMING_SNAKE_CASE for constants.
+- **Styling:** Tailwind CSS only — avoid inline styles unless absolutely necessary.
+- **Accessibility:** all UI should meet WCAG AA standards.
+
+## Error handling
+
+- A **401** (missing/expired token) redirects to `/login`.
+- A **403** (valid token, wrong role) shows an access-denied state rather than a blank page.
+- A **500** shows a generic retry-able error rather than exposing the backend stack trace.
+- Form validation errors (e.g. invalid email) are shown inline next to the offending field.
+
+See [Backend → Error Handling](/backend) for the full status code table the dashboard needs to handle.
+
+## Brand compliance
+
+Color palette: Ishuko green (primary) + black/near-black accent. Typography: Roboto. Buttons and CTAs follow a consistent green-on-white / white-on-green system across mobile and web — the same design tokens used across the platform.
+
+## Setup
+
+```bash
+cd TechDex_Dashboard
+npm install
+```
+
+Create `.env.local`:
+
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+```bash
+npm run dev
+```
+
+## Deployment
+
+Hosted on **Vercel**, auto-deploying from `main`. Every pull request gets a preview build for review; merging to `main` triggers production deployment with environment variables injected at build time.
+
+## QA
+
+Jest + React Testing Library, one test file per component. The full suite runs on every GitHub Pull Request alongside lint checks; a PR should not merge with failing tests.

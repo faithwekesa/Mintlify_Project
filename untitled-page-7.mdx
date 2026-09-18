@@ -1,0 +1,197 @@
+---
+title: "Rebuild & Deployment Guide"
+---
+
+---
+
+## title: "Rebuild & Deployment Guide" description: "A practical build path for recreating Ishuko from scratch"
+
+A practical guide for a software engineer recreating Ishuko from scratch — what to build, in what order, and how to deploy every piece. This page ties together the [Architecture](/architecture), [Backend](/backend), [AI Quality Assessment Module](/ai-quality-assessment), [Mobile App](/mobile-app), and [Admin Dashboard](/admin-dashboard) pages into a single build path.
+
+## Deployment architecture
+
+| Component | Hosting | Notes |
+| --- | --- | --- |
+| Core backend (FastAPI) | Heroku | Behind the WAF + API Security Layer — see [Architecture](/architecture) |
+| AI grading microservice | GCP Cloud Run | Independent, stateless container; scales separately from the core API |
+| Admin web dashboard (Next.js) | Vercel | Auto-deploys from `main`; PR preview builds |
+| Mobile app (Flutter) | App stores / TestFlight / internal distribution | Points at the production backend base URL |
+| Primary database | Heroku Postgres add-on | Encrypted at rest; TLS in transit |
+| Backup datastore | Supabase | Encrypted backup replication target for Postgres |
+| Payments | Flutterwave (API + webhook) | Signature-verified, idempotency-checked |
+| Mobile money | Airtel / Zamtel / MTN APIs | Moves funds to/from user mobile money accounts |
+| Geocoding | External Location API | Called by the Location Service to resolve depot addresses |
+
+## Recommended build order
+
+Building the pieces in this order minimizes rework, since each layer depends on the one before it.
+
+<Steps>
+  <Step title="Database schema">
+    Stand up PostgreSQL and model the 6 core tables first — everything else depends on this shape: `user`, `cooperative`, `produce_listing`, `ai_grading_result`, `payment`, `order`. Use Alembic from day one so every schema change is a tracked migration.
+  </Step>
+  <Step title="Backend core (auth + CRUD)">
+    Scaffold the FastAPI project using the [layered pattern](/backend): backend/ ├── main.py ├── database.py ├── models/ ├── repositories/ ├── services/ ├── schemas/ └── routers/ Build in this order: **users router** (registration, login, JWT issuance, password reset flow) → **cooperatives router** (registration with GPS capture) → **produce_listings router** (`POST /produce_listings/` accepting multipart form data).
+  </Step>
+  <Step title="AI grading microservice">
+    Build this as an independent service so it can scale/deploy separately from the core API (see the [AI Quality Assessment Module](/ai-quality-assessment)):
+
+    1. Implement the OpenCV contour-segmentation step.
+    2. Train or source a YOLOv8 classification model on the RoboFlow / Kaggle maize datasets.
+    3. Implement the weakest-link grading logic and grade-to-price modifier mapping.
+    4. Containerize and deploy to Cloud Run.
+    5. Wire the core backend's `ai_grading_results` router to call this service and persist results.
+  </Step>
+  <Step title="Pricing integration">
+    Pull live prices from the WFP HDX Zambia Food Prices dataset and combine with the grade modifier to compute `price_per_kg` on each listing. Decide and document one canonical modifier table — see [Core Features](/core-features) for the resolved version — before writing this logic.
+  </Step>
+  <Step title="Marketplace, orders & escrow">
+    - **orders router** — order creation, pickup-date validation (within 7 days of order placement).
+    - **payments router** — escrow deposit, Flutterwave webhook handler, `escrow_status` state machine (`HELD` → `DISBURSED` / `REFUNDED`).
+    - **OTP generation** — cryptographically random 6-digit code, stored as a hash, dispatched via SMS gateway; 7-day expiry + 5% cancellation penalty refund logic.
+    - `POST /transactions/{id}/release` — validates the OTP hash and triggers settlement.
+  </Step>
+  <Step title="Mobile app (Flutter)">
+    Build screens in this order, matching real user flow (see [Mobile App](/mobile-app)): auth screens → cooperative flow (location permission, grading capture, AI report result, listing preview/history) → buyer flow (marketplace, cart, pickup date picker, payment, order history, notifications) → shared (bottom nav, secure JWT storage, notification service).
+  </Step>
+  <Step title="Admin web dashboard (Next.js)">
+    Login + 2FA-ready auth screen (mirrors mobile) → dashboard home (aggregate stats) → Cooperative/Buyer Summary tables → apply [Ishuko brand tokens](/admin-dashboard) across every component.
+  </Step>
+  <Step title="QA pass">
+    Work through [Quality Assurance & Testing](/quality-assurance) before calling any milestone done: unit tests for OTP generation, cancellation penalty math, pickup-date constraints; integration tests for the camera→AI pipeline and full escrow lifecycle; load test AI inference (target \< 3s).
+  </Step>
+</Steps>
+
+## Environment variables reference
+
+<Tabs>
+  <Tab title="Backend">
+    ```bash
+        DATABASE_URL=postgresql://<user>:<password>@localhost:5432/ishuko-db
+        JWT_SECRET_KEY=<a-long-random-secret>
+        JWT_ALGORITHM=HS256
+        JWT_EXPIRE_DAYS=30
+        CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,https://<your-dashboard>.vercel.app
+    ```
+  </Tab>
+  <Tab title="Admin Dashboard">
+    ```bash
+        NEXT_PUBLIC_API_URL=http://localhost:8000
+    ```
+  </Tab>
+  <Tab title="AI Service">
+    - `MODEL_PATH` — path to the trained YOLOv8-cls weights (e.g. `best_maize_yolov8_cls.pt`)
+    - Memory: allocate ≥ 2Gi per container instance
+  </Tab>
+</Tabs>
+
+## Local dev quickstart
+
+```bash
+# 1. Database
+createdb ishuko-db
+
+# 2. Backend
+cd TechDex_Backend
+uv venv env
+source venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn main:app --reload
+# → verify http://localhost:8000/docs
+
+# 3. AI service (separate repo/container)
+docker build -t ishuko-ai .
+docker run -p 8080:8080 --memory=2g ishuko-ai
+# → verify http://localhost:8080/health
+
+# 4. Admin dashboard
+cd TechDex_Dashboard
+npm install
+echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+npm run dev
+
+# 5. Mobile app
+cd ishuko
+flutter pub get
+flutter run
+```
+
+## Deployment checklist
+
+<Steps>
+  <Step title="Database">
+    Provision Heroku Postgres (or managed Postgres of choice); run `alembic upgrade head` against it.
+  </Step>
+  <Step title="AI microservice">
+    Build and push the Docker image; deploy to GCP Cloud Run with ≥ 2Gi memory; note the resulting service URL.
+  </Step>
+  <Step title="Core backend">
+    Deploy to Heroku (`git push heroku main`); set config vars; confirm `/docs` loads and `GET /users/` works with a valid admin token.
+  </Step>
+  <Step title="Admin dashboard">
+    Deploy to Vercel from the connected GitHub repo; set `NEXT_PUBLIC_API_URL`; redeploy after any env var change.
+  </Step>
+  <Step title="Update CORS">
+    Go back to the Heroku backend and confirm `CORS_ORIGINS` includes the final production dashboard URL.
+  </Step>
+  <Step title="Mobile app">
+    Point the Flutter app's API base URL at the production backend; build release binaries; distribute via TestFlight / Play Console internal testing before a public release.
+  </Step>
+  <Step title="Smoke test end-to-end">
+    Register a cooperative, run a 3-image grading session, publish a listing, register a buyer, place an order, deposit to escrow, release via OTP, confirm the payment record shows `DISBURSED`.
+  </Step>
+</Steps>
+
+## External services
+
+| Service | Purpose | Notes |
+| --- | --- | --- |
+| WAF / Cloudflare-class edge | Filters malicious traffic before it reaches the API | Sits in front of both mobile and web client traffic — see [Architecture](/architecture) |
+| Flutterwave | Payment processing | Sends signature-verified webhooks on payment events |
+| Airtel / Zamtel / MTN Mobile Money APIs | Moving funds to/from user accounts | Tied to each user's phone number |
+| SMS / notification gateway | Delivers the 6-digit OTP to buyers | Also used for order-status and pickup-reminder notifications |
+| Location API | Reverse geocoding for depot pickup addresses | Called by the backend's Location Service |
+| WFP HDX | Live Zambia maize market prices | Polled to compute `price_per_kg` on each listing |
+
+## System integration
+
+Components communicate exclusively over HTTPS/TLS 1.2+. See the full request-path walkthrough in [Architecture → Data Flow](/architecture).
+
+## CI/CD pipeline
+
+- **Trigger:** every GitHub Pull Request against `main` runs `flutter analyze`, lint, and the full backend/frontend unit test suite.
+- **Preview builds:** Vercel generates a live preview deployment for every dashboard PR.
+- **Deploy on merge:** merging to `main` triggers automatic production deployment.
+- **Manual gate:** the AI microservice and mobile app builds are deployed via explicit steps rather than auto-deployed on every merge, since both require additional review before going live.
+
+## Common pitfalls
+
+| Symptom | Likely Cause |
+| --- | --- |
+| CORS preflight fails with 400 | Malformed `CORS_ORIGINS` value (stray space, trailing slash, missing scheme) |
+| 401 "Not authenticated" | No `Authorization: Bearer <token>` header sent at all |
+| 401 "Invalid or expired token" | Token sent but failed JWT verification/expired |
+| 403 on an admin route | Valid token, but `user_type != "ADMIN"` |
+| 404 on an otherwise-correct route | Double slash in the base URL, or an unset frontend env var resolving to `undefined` |
+| 500 with no obvious cause | Unhandled backend exception — check `heroku logs --tail` |
+
+## Definition of done (release criteria)
+
+<CardGroup cols={2}>
+  <Card title="Test coverage">
+    ≥ 80% unit test coverage across frontend widgets and backend logic.
+  </Card>
+
+  <Card title="AI accuracy">
+    ≥ 95% AI grading precision across Grade A–D thresholds.
+  </Card>
+
+  <Card title="Security">
+    Zero blocking vulnerabilities or failed escrow state loops.
+  </Card>
+
+  <Card title="CI">
+    Runs `flutter analyze`, lint, and all unit tests on every PR.
+  </Card>
+</CardGroup>

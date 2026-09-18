@@ -1,0 +1,85 @@
+---
+title: "AI Quality Assessment Module"
+---
+
+## System overview
+
+The Quality Assessment Module is a containerized, backend-driven AI system that inspects, grades, and evaluates multi-seed maize crop samples. To resolve downscaling errors from passing wide-angle, high-resolution photos to a network trained on single crops, the system uses a **two-step edge processing pipeline**: OpenCV segments individual kernels, then YOLOv8 classifies each one.
+
+| Layer | Responsibility | Key Tech |
+| --- | --- | --- |
+| Frontend | Captures multi-seed samples on a dark, high-contrast surface; dispatches via HTTP POST | React / Flutter |
+| Backend AI Engine | Segments kernels (OpenCV), classifies each (YOLOv8), computes grade + price | Python 3.10 / FastAPI, OpenCV, Ultralytics YOLOv8-cls |
+
+## Models used
+
+<Info>
+  This is a classification system, not a generative or retrieval system — no LLM or knowledge base involved.
+</Info>
+
+- **YOLOv8-cls** — classifies each kernel into `good_maize`, `insect_damage`, `moldy`, `broken`, or `extraneous_matter`.
+- **OpenCV contour detection** — classical CV segmentation (Otsu thresholding + contours) that isolates each kernel before classification.
+
+## Training approach
+
+Ishuko uses **supervised fine-tuning**, not RAG — there is no document corpus to retrieve from. A pretrained YOLOv8 classification backbone is fine-tuned on labeled maize kernel images sourced from RoboFlow's Maize Seeds Quality Analysis dataset and a Kaggle Maize Seed Dataset.
+
+## Data pipeline
+
+<Steps>
+  <Step title="Capture">
+    3 images per sample, camera-only, no gallery import.
+  </Step>
+  <Step title="Segment">
+    OpenCV isolates each kernel via contour detection.
+  </Step>
+  <Step title="Classify">
+    Each kernel is resized to 224×224 and classified by YOLOv8.
+  </Step>
+  <Step title="Aggregate">
+    `evaluate_maize_batch` applies weakest-link grading to produce a batch grade.
+  </Step>
+  <Step title="Price">
+    Grade is mapped to a price modifier against the live WFP market price.
+  </Step>
+  <Step title="Persist">
+    Grade, defect ratios, and confidence score are stored and surfaced in the Quality Assessment Report.
+  </Step>
+</Steps>
+
+## Integration
+
+- **Input:** exactly 3 images per grading session, submitted as multipart form data via `POST /produce_listings/`.
+- **Authorization:** the AI service sits behind the same API Security Layer as the rest of the backend — see [Security](/security).
+- **Anonymization:** grading images are associated only with the produce listing and owning cooperative.
+
+## Grading thresholds
+
+| Defect Class | Grade A | Grade B | Grade C | Grade D | Reject |
+| --- | --- | --- | --- | --- | --- |
+| Insect / Pest Damage | \< 3.0% | \< 6.0% | \< 9.0% | \< 15.0% | ≥ 15.0% |
+| Discolored / Moldy | \< 3.0% | \< 6.0% | \< 9.0% | \< 15.0% | ≥ 15.0% |
+| Broken / Chipped | \< 6.0% | \< 7.0% | \< 8.0% | \< 9.0% | ≥ 9.0% |
+| Extraneous Matter | \< 1.0% | \< 1.5% | \< 2.0% | \< 2.5% | ≥ 2.5% |
+
+A **weakest-link** rule applies: any single defect crossing a threshold drops the whole batch to that grade.
+
+## Targets & limitations
+
+<CardGroup cols={2}>
+  <Card title="Precision target">
+    Minimum 95% precision for Grade A–D thresholds.
+  </Card>
+
+  <Card title="Latency target">
+    Grading reports return in under 3 seconds under concurrent load.
+  </Card>
+</CardGroup>
+
+**Known limitations:** lighting/background sensitivity, single-crop-type training (maize only), assumes the photographed sample represents the full batch, no adversarial-image defense, no in-session retake guidance.
+
+**Future improvements:** multi-crop support, an active learning loop from disputed/overridden grades, on-device pre-checks for unusable photos, and explainability overlays showing which kernels triggered which defect class.
+
+## Deployment
+
+Runs in stateless containers on **GCP Cloud Run** (minimum 2Gi memory per instance), deployed via GitHub Actions. Base slim Linux runtimes need `libgl1-mesa-glx` and `libglib2.0-0` injected during multi-stage builds for OpenCV to function.
